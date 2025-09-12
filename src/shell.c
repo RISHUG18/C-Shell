@@ -27,7 +27,6 @@
     void cleanup_bg_jobs(void);
     void cleanup_bgjobs(void);
     // Background job status checker
-
 // Data structures and global variables for job control and shell state
 #define MAX_BG_JOBS 128
 typedef struct {
@@ -49,6 +48,7 @@ char prevcwd[1024];        // Previous working directory
 int prev_set = 0;          // Track if hop has successfully set prevcwd at least once
 int child_pid = -1;        // PID of current foreground child
 
+//llm code starts//
 // Print a friendly error when execvp fails
 static void report_exec_error(const char *cmd) {
     switch (errno) {
@@ -67,8 +67,9 @@ static void report_exec_error(const char *cmd) {
             break;
     }
 }
+//llm code ends//
 
-
+//llm code starts//
 // Check status of background jobs and clean up finished ones
 void check_bg_jobs() {
     for (int i = 0; i < bg_job_count; ++i) {
@@ -101,6 +102,7 @@ void check_bg_jobs() {
     // Prune inactive entries
     cleanup_bg_jobs();
 }
+//llm code ends//
 // Print the shell prompt with current directory or computer name
 void print_prompt() {
     char res[1024];
@@ -110,6 +112,7 @@ void print_prompt() {
     fflush(stdout);
 }
 
+//llm code starts//
 // Handler for SIGINT (Ctrl+C)
 void sigint_handler(int sig) {
     if (child_pid > 0) {
@@ -124,7 +127,7 @@ void sigint_handler(int sig) {
     // Re-register the handler to keep shell running
     signal(SIGINT, sigint_handler);
 }
-
+//llm code ends//
     // void tologs(char* intake){
     //     FILE* file=fopen("logs.txt","r");
     //     char history[15][1024];
@@ -154,7 +157,7 @@ void sigint_handler(int sig) {
     //     // for(int i=)
     // }
 
-
+//llm code starts//
 // Execute a chain of commands (AST), handling pipes, redirections, and builtins
 void execute(Command* ast) {
     int prev_fd = -1;
@@ -364,13 +367,15 @@ void execute(Command* ast) {
     dup2(mainout, STDOUT_FILENO);
     close(mainin); close(mainout);
 }
+//llm code ends//
+
     // Helper for sorting jobs lexicographically by command name
 int cmp_bgjob(const void *a, const void *b) {
     const BgJob *ja = *(const BgJob **)a;
     const BgJob *jb = *(const BgJob **)b;
     return strcmp(ja->cmd_name, jb->cmd_name);
 }
-
+//llm code starts//
 // Returns "Running" or "Stopped" for a given pid
 const char* get_job_state(pid_t pid) {
     char proc_path[64];
@@ -406,6 +411,8 @@ void cleanup_bg_jobs() {
 void cleanup_bgjobs() {
     cleanup_bg_jobs();
 }
+//llm code ends//
+
 
 //llm code starts//
 // The activities command implementation
@@ -715,7 +722,7 @@ int main(){
             ping_command(tokens[1], tokens[2]);
             continue;
         }
-
+//llm code starts//
         // fg/bg builtins
         if ((token_cnt == 1 || token_cnt == 2) && strcmp(tokens[0], "fg") == 0) {
             int have_arg = (token_cnt == 2);
@@ -731,7 +738,10 @@ int main(){
             bg_builtin(have_arg, job_num);
             continue;
         }
+        //llm code ends//
 
+        
+        //llm code starts//
         // Process commands in the AST one by one
         Command* current_cmd = ast;
         while (current_cmd != NULL) {
@@ -863,7 +873,7 @@ int main(){
                 current_cmd = next_after_fg;
             }
         }
-
+        //llm code ends//
         }
         
     }
