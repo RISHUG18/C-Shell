@@ -1,80 +1,82 @@
+// Include all necessary headers for shell functionality
 #include "../include/A1.h"
-    #include "../include/tokenize.h"
-    #include "../include/shell.h"
-    #include "../include/A3.h"
-    #include "../include/ast.h"
-    #include "../include/B1.h"
-    #include <sys/wait.h>
-    #include "../include/B2.h"
-    // #include "B3.h"
-    #include "../include/shell.h"
-    #include <signal.h>
-    #include <fcntl.h>
-    #include <unistd.h>
-    #include <string.h>
-    #include <stdlib.h>
-    #include <stdio.h>
-    #include <errno.h>
+#include "../include/tokenize.h"
+#include "../include/shell.h"
+#include "../include/A3.h"
+#include "../include/ast.h"
+#include "../include/B1.h"
+#include <sys/wait.h>
+#include "../include/B2.h"
+// #include "B3.h"
+#include "../include/shell.h"
+#include <signal.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <signal.h>
-    // #include "C2.h"
-    // #include<pwd.h>
-    // #include<unistd.h>
+// #include "C2.h"
+// #include<pwd.h>
+// #include<unistd.h>
+    // Forward declarations for custom commands and job cleanup
     void ping_command(const char *pid_str, const char *sig_str);
-// Add forward declarations to avoid implicit declaration issues and provide alias
-void cleanup_bg_jobs(void);
-void cleanup_bgjobs(void);
-// Background job status checker
+    void cleanup_bg_jobs(void);
+    void cleanup_bgjobs(void);
+    // Background job status checker
 
+// Data structures and global variables for job control and shell state
 #define MAX_BG_JOBS 128
-            typedef struct {
-                int job_num;
-                pid_t pid;
-                char cmd_name[256];
-                char cmd_line[1024]; // full command for printing
-                int active;
-                int stopped; // 1 if stopped by SIGTSTP, 0 otherwise
-            } BgJob;
-            BgJob bg_jobs[MAX_BG_JOBS];
-            int bg_job_count = 0;
-            // Monotonic counter for unique job numbers across the session
-            int next_job_num = 1;
-    char* tokens[MAX_TOKENS];
-    int token_cnt;
-    char home[1024];
-    char shellcwd[1024];
-    char prevcwd[1024];
-    int prev_set = 0; // track if hop has successfully set prevcwd at least once
+typedef struct {
+    int job_num;           // Unique job number
+    pid_t pid;             // Process ID
+    char cmd_name[256];    // Command name
+    char cmd_line[1024];   // Full command line for printing
+    int active;            // 1 if job is active
+    int stopped;           // 1 if stopped by SIGTSTP, 0 otherwise
+} BgJob;
+BgJob bg_jobs[MAX_BG_JOBS];
+int bg_job_count = 0;
+int next_job_num = 1;      // Monotonic counter for unique job numbers
+char* tokens[MAX_TOKENS];
+int token_cnt;
+char home[1024];           // Home directory
+char shellcwd[1024];       // Current working directory
+char prevcwd[1024];        // Previous working directory
+int prev_set = 0;          // Track if hop has successfully set prevcwd at least once
+int child_pid = -1;        // PID of current foreground child
 
-    int child_pid=-1;
-
-    // Print a friendly error when execvp fails
-    static void report_exec_error(const char *cmd) {
-        switch (errno) {
-            case ENOENT:
-            case ENOTDIR:
-                fprintf(stderr, "Command not found!\n");
-                break;
-            case EACCES:
-                fprintf(stderr, "Permission denied!\n");
-                break;
-            case ENOEXEC:
-                fprintf(stderr, "Exec format error!\n");
-                break;
-            default:
-                perror(cmd ? cmd : "execvp");
-                break;
-        }
+// Print a friendly error when execvp fails
+static void report_exec_error(const char *cmd) {
+    switch (errno) {
+        case ENOENT:
+        case ENOTDIR:
+            fprintf(stderr, "Command not found!\n");
+            break;
+        case EACCES:
+            fprintf(stderr, "Permission denied!\n");
+            break;
+        case ENOEXEC:
+            fprintf(stderr, "Exec format error!\n");
+            break;
+        default:
+            perror(cmd ? cmd : "execvp");
+            break;
     }
+}
 
 
+// Check status of background jobs and clean up finished ones
 void check_bg_jobs() {
     for (int i = 0; i < bg_job_count; ++i) {
         if (bg_jobs[i].active) {
             int status;
             pid_t result = waitpid(bg_jobs[i].pid, &status, WNOHANG);
             if (result > 0) {
+                // Job finished
                 bg_jobs[i].active = 0;
                 bg_jobs[i].stopped = 0;
                 if (WIFEXITED(status)) {
@@ -99,6 +101,7 @@ void check_bg_jobs() {
     // Prune inactive entries
     cleanup_bg_jobs();
 }
+// Print the shell prompt with current directory or computer name
 void print_prompt() {
     char res[1024];
     getcwd(shellcwd, sizeof(shellcwd));
@@ -107,19 +110,19 @@ void print_prompt() {
     fflush(stdout);
 }
 
+// Handler for SIGINT (Ctrl+C)
 void sigint_handler(int sig) {
     if (child_pid > 0) {
-        // forward SIGINT to the child process
-        // Send to the entire foreground process group
+        // Forward SIGINT to the child process group
         kill(-child_pid, SIGINT);
     } else {
-        // if no child, print newline and reprint prompt
+        // If no child, print newline and reprint prompt
         printf("\n");
         // print_prompt();
         fflush(stdout);
     }
-    // Important: Don't let the signal terminate the shell
-    signal(SIGINT, sigint_handler); // Re-register the handler
+    // Re-register the handler to keep shell running
+    signal(SIGINT, sigint_handler);
 }
 
     // void tologs(char* intake){
@@ -152,214 +155,215 @@ void sigint_handler(int sig) {
     // }
 
 
-    void execute(Command* ast){
-        int prev_fd = -1;
-        int mainin = dup(STDIN_FILENO);
-        int mainout = dup(STDOUT_FILENO);
+// Execute a chain of commands (AST), handling pipes, redirections, and builtins
+void execute(Command* ast) {
+    int prev_fd = -1;
+    int mainin = dup(STDIN_FILENO);
+    int mainout = dup(STDOUT_FILENO);
 
-        for (Command* cmd = ast; cmd != NULL; cmd = cmd->next) {
-            if (!cmd->args || !cmd->args[0]) continue;
-            if (strcmp(cmd->args[0], "|") == 0) continue; // skip pipe tokens
+    for (Command* cmd = ast; cmd != NULL; cmd = cmd->next) {
+        // Skip empty or pipe tokens
+        if (!cmd->args || !cmd->args[0]) continue;
+        if (strcmp(cmd->args[0], "|") == 0) continue;
 
-            int pipefd[2];
-            int usepipe = (cmd->next && strcmp(cmd->next->args[0], "|") == 0);
-            if (usepipe) {
-                if (pipe(pipefd) < 0) {
-                    perror("pipe");
-                    // skip this stage
-                    continue;
+        int pipefd[2];
+        int usepipe = (cmd->next && strcmp(cmd->next->args[0], "|") == 0);
+        if (usepipe) {
+            if (pipe(pipefd) < 0) {
+                perror("pipe");
+                continue;
+            }
+        }
+
+        // Handle simple command (no pipeline)
+        if (!usepipe && prev_fd == -1) {
+            int save_in = dup(STDIN_FILENO);
+            int save_out = dup(STDOUT_FILENO);
+            int redir_failed = 0;
+
+            // Handle input/output redirections
+            for (int i = 1; cmd->args[i] != NULL; i++) {
+                if (strncmp(cmd->args[i], "<", 1) == 0) {
+                    const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
+                    int fd = open(path, O_RDONLY, 0644);
+                    if (fd < 0) { fprintf(stderr, "No such file or directory\n"); redir_failed = 1; break; }
+                    dup2(fd, STDIN_FILENO); close(fd); cmd->args[i] = NULL;
+                } else if (strncmp(cmd->args[i], ">>", 2) == 0) {
+                    const char *path = (strlen(cmd->args[i]) == 2) ? cmd->args[i + 1] : cmd->args[i] + 2;
+                    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+                    if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); redir_failed = 1; break; }
+                    dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
+                } else if (strncmp(cmd->args[i], ">", 1) == 0) {
+                    const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
+                    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); redir_failed = 1; break; }
+                    dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
                 }
             }
 
-            // Simple command (no pipeline and no previous pipe input):
-            if (!usepipe && prev_fd == -1) {
-                int save_in = dup(STDIN_FILENO);
-                int save_out = dup(STDOUT_FILENO);
-                int redir_failed = 0;
-
-                // Apply redirections in parent for simple case
-                for (int i = 1; cmd->args[i] != NULL; i++) {
-                    if (strncmp(cmd->args[i], "<", 1) == 0) {
-                        const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
-                        int fd = open(path, O_RDONLY, 0644);
-                        if (fd < 0) { fprintf(stderr, "No such file or directory\n"); redir_failed = 1; break; }
-                        dup2(fd, STDIN_FILENO); close(fd); cmd->args[i] = NULL;
-                    } else if (strncmp(cmd->args[i], ">>", 2) == 0) {
-                        const char *path = (strlen(cmd->args[i]) == 2) ? cmd->args[i + 1] : cmd->args[i] + 2;
-                        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-                        if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); redir_failed = 1; break; }
-                        dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
-                    } else if (strncmp(cmd->args[i], ">", 1) == 0) {
-                        const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
-                        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                        if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); redir_failed = 1; break; }
-                        dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
-                    }
-                }
-
-                if (redir_failed) {
-                    dup2(save_in, STDIN_FILENO);
-                    dup2(save_out, STDOUT_FILENO);
-                    close(save_in); close(save_out);
-                    continue;
-                }
-
-                // Builtins in simple case run in parent
-                if (strcmp(cmd->name, "hop") == 0) {
-                    // Fix: If 'hop -' and prevcwd is unset, do nothing and keep prompt
-                    int hop_to_prev = 0;
-                    for (int h = 1; cmd->args[h] != NULL; h++) {
-                        if (strcmp(cmd->args[h], "-") == 0) hop_to_prev = 1;
-                    }
-                    if (hop_to_prev && (prevcwd[0] == '\0' || strcmp(prevcwd, ".") == 0)) {
-                        // prevcwd is unset or invalid, do nothing
-                    } else {
-                        hop(cmd);
-                    }
-                    dup2(save_in, STDIN_FILENO);
-                    dup2(save_out, STDOUT_FILENO);
-                    close(save_in); close(save_out);
-                    continue;
-                }
-                if (strcmp(cmd->name, "reveal") == 0) {
-                    reveal(cmd);
-                    dup2(save_in, STDIN_FILENO);
-                    dup2(save_out, STDOUT_FILENO);
-                    close(save_in); close(save_out);
-                    continue;
-                }
-                if (strcmp(cmd->args[0], "log") == 0) {
-                    char logpath[1050]; snprintf(logpath, sizeof(logpath), "log.txt");
-                    FILE* fd = fopen(logpath, "r");
-                    if (!fd) { dup2(save_in, STDIN_FILENO); dup2(save_out, STDOUT_FILENO); close(save_in); close(save_out); continue; }
-                    char logbuffer[16][1050]; int ln = 0;
-                    while (ln < 16 && fgets(logbuffer[ln], sizeof(logbuffer[ln]), fd)) ln++;
-                    fclose(fd);
-                    if (cmd->args[1] == NULL) {
-                        for (int j = 0; j < ln; j++) printf("%s", logbuffer[j]);
-                        dup2(save_in, STDIN_FILENO); dup2(save_out, STDOUT_FILENO); close(save_in); close(save_out);
-                        continue;
-                    }
-                    for (int j = 1; cmd->args[j] != NULL; j++) {
-                        if (strcmp(cmd->args[j], "purge") == 0) { int tmp = open(logpath, O_CREAT | O_WRONLY | O_TRUNC, 0644); if (tmp >= 0) close(tmp); }
-                        if (strcmp(cmd->args[j], "execute") == 0 && cmd->args[j+1]) {
-                            int idx = atoi(cmd->args[j+1]);
-                            if (idx > 0 && idx <= ln) {
-                                tokenize_input(logbuffer[ln - idx]);
-                                Command* sub = parse_tokens();
-                                execute(sub);
-                            }
-                        }
-                    }
-                    dup2(save_in, STDIN_FILENO); dup2(save_out, STDOUT_FILENO); close(save_in); close(save_out);
-                    continue;
-                }
-
-                // External simple command
-                pid_t cpid = fork();
-                if (cpid == 0) {
-                    execvp(cmd->args[0], cmd->args);
-                    report_exec_error(cmd->args[0]);
-                    int code = (errno == ENOENT || errno == ENOTDIR) ? 127 : (errno == EACCES ? 126 : 1);
-                    _exit(code);
-                } else if (cpid > 0) {
-                    waitpid(cpid, NULL, 0);
-                } else {
-                    perror("fork");
-                }
-
+            if (redir_failed) {
                 dup2(save_in, STDIN_FILENO);
                 dup2(save_out, STDOUT_FILENO);
                 close(save_in); close(save_out);
                 continue;
             }
 
-            // Pipelined or has previous input
-            pid_t pid = fork();
-            if (pid == 0) {
-                // CHILD
-                if (prev_fd != -1) { dup2(prev_fd, STDIN_FILENO); close(prev_fd); }
-                if (usepipe) { dup2(pipefd[1], STDOUT_FILENO); close(pipefd[0]); close(pipefd[1]); }
-
-                // Redirections in child
-                for (int i = 1; cmd->args[i] != NULL; i++) {
-                    if (strncmp(cmd->args[i], "<", 1) == 0) {
-                        const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
-                        int fd = open(path, O_RDONLY, 0644);
-                        if (fd < 0) { fprintf(stderr, "No such file or directory\n"); _exit(1); }
-                        dup2(fd, STDIN_FILENO); close(fd); cmd->args[i] = NULL;
-                    } else if (strncmp(cmd->args[i], ">>", 2) == 0) {
-                        const char *path = (strlen(cmd->args[i]) == 2) ? cmd->args[i + 1] : cmd->args[i] + 2;
-                        int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
-                        if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); _exit(1); }
-                        dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
-                    } else if (strncmp(cmd->args[i], ">", 1) == 0) {
-                        const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
-                        int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                        if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); _exit(1); }
-                        dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
+            // Handle built-in commands in parent
+            if (strcmp(cmd->name, "hop") == 0) {
+                int hop_to_prev = 0;
+                for (int h = 1; cmd->args[h] != NULL; h++) {
+                    if (strcmp(cmd->args[h], "-") == 0) hop_to_prev = 1;
+                }
+                if (hop_to_prev && (prevcwd[0] == '\0' || strcmp(prevcwd, ".") == 0)) {
+                    // prevcwd is unset or invalid, do nothing
+                } else {
+                    hop(cmd);
+                }
+                dup2(save_in, STDIN_FILENO);
+                dup2(save_out, STDOUT_FILENO);
+                close(save_in); close(save_out);
+                continue;
+            }
+            if (strcmp(cmd->name, "reveal") == 0) {
+                reveal(cmd);
+                dup2(save_in, STDIN_FILENO);
+                dup2(save_out, STDOUT_FILENO);
+                close(save_in); close(save_out);
+                continue;
+            }
+            if (strcmp(cmd->args[0], "log") == 0) {
+                // Handle log command: print, purge, or execute from log
+                char logpath[1050]; snprintf(logpath, sizeof(logpath), "log.txt");
+                FILE* fd = fopen(logpath, "r");
+                if (!fd) { dup2(save_in, STDIN_FILENO); dup2(save_out, STDOUT_FILENO); close(save_in); close(save_out); continue; }
+                char logbuffer[16][1050]; int ln = 0;
+                while (ln < 16 && fgets(logbuffer[ln], sizeof(logbuffer[ln]), fd)) ln++;
+                fclose(fd);
+                if (cmd->args[1] == NULL) {
+                    for (int j = 0; j < ln; j++) printf("%s", logbuffer[j]);
+                    dup2(save_in, STDIN_FILENO); dup2(save_out, STDOUT_FILENO); close(save_in); close(save_out);
+                    continue;
+                }
+                for (int j = 1; cmd->args[j] != NULL; j++) {
+                    if (strcmp(cmd->args[j], "purge") == 0) { int tmp = open(logpath, O_CREAT | O_WRONLY | O_TRUNC, 0644); if (tmp >= 0) close(tmp); }
+                    if (strcmp(cmd->args[j], "execute") == 0 && cmd->args[j+1]) {
+                        int idx = atoi(cmd->args[j+1]);
+                        if (idx > 0 && idx <= ln) {
+                            tokenize_input(logbuffer[ln - idx]);
+                            Command* sub = parse_tokens();
+                            execute(sub);
+                        }
                     }
                 }
+                dup2(save_in, STDIN_FILENO); dup2(save_out, STDOUT_FILENO); close(save_in); close(save_out);
+                continue;
+            }
 
-                // Builtins in pipeline should run in child
-                if (strcmp(cmd->args[0], "reveal") == 0) { reveal(cmd); _exit(0); }
-                if (strcmp(cmd->args[0], "hop") == 0) { _exit(1); }
-                if (strcmp(cmd->args[0], "log") == 0) {
-                    char logpath[1050]; snprintf(logpath, sizeof(logpath), "log.txt");
-                    FILE* fd = fopen(logpath, "r");
-                    if (fd) {
-                        char logbuffer[16][1050]; int ln = 0;
-                        while (ln < 16 && fgets(logbuffer[ln], sizeof(logbuffer[ln]), fd)) ln++;
-                        fclose(fd);
-                        if (cmd->args[1] == NULL) {
-                            for (int j = 0; j < ln; j++) printf("%s", logbuffer[j]);
-                        } else {
-                            for (int j = 1; cmd->args[j] != NULL; j++) {
-                                if (strcmp(cmd->args[j], "purge") == 0) { int tmp = open(logpath, O_CREAT | O_WRONLY | O_TRUNC, 0644); if (tmp >= 0) close(tmp); }
-                                if (strcmp(cmd->args[j], "execute") == 0 && cmd->args[j+1]) {
-                                    int idx = atoi(cmd->args[j+1]);
-                                    if (idx > 0 && idx <= ln) {
-                                        tokenize_input(logbuffer[ln - idx]);
-                                        Command* sub = parse_tokens();
-                                        execute(sub);
-                                    }
+            // External command: fork and exec
+            pid_t cpid = fork();
+            if (cpid == 0) {
+                execvp(cmd->args[0], cmd->args);
+                report_exec_error(cmd->args[0]);
+                int code = (errno == ENOENT || errno == ENOTDIR) ? 127 : (errno == EACCES ? 126 : 1);
+                _exit(code);
+            } else if (cpid > 0) {
+                waitpid(cpid, NULL, 0);
+            } else {
+                perror("fork");
+            }
+
+            dup2(save_in, STDIN_FILENO);
+            dup2(save_out, STDOUT_FILENO);
+            close(save_in); close(save_out);
+            continue;
+        }
+
+        // Handle pipelined commands or previous input
+        pid_t pid = fork();
+        if (pid == 0) {
+            // CHILD
+            if (prev_fd != -1) { dup2(prev_fd, STDIN_FILENO); close(prev_fd); }
+            if (usepipe) { dup2(pipefd[1], STDOUT_FILENO); close(pipefd[0]); close(pipefd[1]); }
+
+            // Redirections in child
+            for (int i = 1; cmd->args[i] != NULL; i++) {
+                if (strncmp(cmd->args[i], "<", 1) == 0) {
+                    const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
+                    int fd = open(path, O_RDONLY, 0644);
+                    if (fd < 0) { fprintf(stderr, "No such file or directory\n"); _exit(1); }
+                    dup2(fd, STDIN_FILENO); close(fd); cmd->args[i] = NULL;
+                } else if (strncmp(cmd->args[i], ">>", 2) == 0) {
+                    const char *path = (strlen(cmd->args[i]) == 2) ? cmd->args[i + 1] : cmd->args[i] + 2;
+                    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
+                    if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); _exit(1); }
+                    dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
+                } else if (strncmp(cmd->args[i], ">", 1) == 0) {
+                    const char *path = (strlen(cmd->args[i]) == 1) ? cmd->args[i + 1] : cmd->args[i] + 1;
+                    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (fd < 0) { fprintf(stderr, "Unable to create file for writing\n"); _exit(1); }
+                    dup2(fd, STDOUT_FILENO); close(fd); cmd->args[i] = NULL;
+                }
+            }
+
+            // Builtins in pipeline run in child
+            if (strcmp(cmd->args[0], "reveal") == 0) { reveal(cmd); _exit(0); }
+            if (strcmp(cmd->args[0], "hop") == 0) { _exit(1); }
+            if (strcmp(cmd->args[0], "log") == 0) {
+                char logpath[1050]; snprintf(logpath, sizeof(logpath), "log.txt");
+                FILE* fd = fopen(logpath, "r");
+                if (fd) {
+                    char logbuffer[16][1050]; int ln = 0;
+                    while (ln < 16 && fgets(logbuffer[ln], sizeof(logbuffer[ln]), fd)) ln++;
+                    fclose(fd);
+                    if (cmd->args[1] == NULL) {
+                        for (int j = 0; j < ln; j++) printf("%s", logbuffer[j]);
+                    } else {
+                        for (int j = 1; cmd->args[j] != NULL; j++) {
+                            if (strcmp(cmd->args[j], "purge") == 0) { int tmp = open(logpath, O_CREAT | O_WRONLY | O_TRUNC, 0644); if (tmp >= 0) close(tmp); }
+                            if (strcmp(cmd->args[j], "execute") == 0 && cmd->args[j+1]) {
+                                int idx = atoi(cmd->args[j+1]);
+                                if (idx > 0 && idx <= ln) {
+                                    tokenize_input(logbuffer[ln - idx]);
+                                    Command* sub = parse_tokens();
+                                    execute(sub);
                                 }
                             }
                         }
                     }
-                    _exit(0);
                 }
-
-                // External in pipeline
-                execvp(cmd->args[0], cmd->args);
-                report_exec_error(cmd->args[0]);
-                {
-                    int code = (errno == ENOENT || errno == ENOTDIR) ? 127 : (errno == EACCES ? 126 : 1);
-                    _exit(code);
-                }
-            } else if (pid > 0) {
-                // PARENT
-                int status = 0;
-                waitpid(pid, &status, 0);
-                if (prev_fd != -1) { close(prev_fd); }
-                if (usepipe) {
-                    close(pipefd[1]);
-                    prev_fd = pipefd[0];
-                } else {
-                    prev_fd = -1;
-                }
-            } else {
-                perror("fork");
-                if (usepipe) { close(pipefd[0]); close(pipefd[1]); }
+                _exit(0);
             }
-        }
 
-        // Cleanup and restore
-        if (prev_fd != -1) close(prev_fd);
-        dup2(mainin, STDIN_FILENO);
-        dup2(mainout, STDOUT_FILENO);
-        close(mainin); close(mainout);
+            // External command in pipeline
+            execvp(cmd->args[0], cmd->args);
+            report_exec_error(cmd->args[0]);
+            {
+                int code = (errno == ENOENT || errno == ENOTDIR) ? 127 : (errno == EACCES ? 126 : 1);
+                _exit(code);
+            }
+        } else if (pid > 0) {
+            // PARENT
+            int status = 0;
+            waitpid(pid, &status, 0);
+            if (prev_fd != -1) { close(prev_fd); }
+            if (usepipe) {
+                close(pipefd[1]);
+                prev_fd = pipefd[0];
+            } else {
+                prev_fd = -1;
+            }
+        } else {
+            perror("fork");
+            if (usepipe) { close(pipefd[0]); close(pipefd[1]); }
+        }
     }
+
+    // Cleanup and restore original stdin/stdout
+    if (prev_fd != -1) close(prev_fd);
+    dup2(mainin, STDIN_FILENO);
+    dup2(mainout, STDOUT_FILENO);
+    close(mainin); close(mainout);
+}
     // Helper for sorting jobs lexicographically by command name
 int cmp_bgjob(const void *a, const void *b) {
     const BgJob *ja = *(const BgJob **)a;
@@ -569,6 +573,7 @@ void sigtstp_handler(int sig) {
 }
 
 //llm code ends//
+// Main shell loop: handles prompt, input, parsing, execution, job control
 int main(){
 
         // char home[1024];
