@@ -4,13 +4,14 @@
  * Responsibilities:
  *   • Initialise shell-wide globals (shell_home, shell_cwd)
  *   • Run the main REPL loop:
- *       1. Print prompt  (prompt.h)
- *       2. Read input
- *       3. (Future days) Parse & execute
+ *       1. Print prompt           (prompt.h)
+ *       2. Read one line of input (input.h)
+ *       3. (Future days) Parse & execute tokens
  */
 
 #include "../include/globals.h"
 #include "../include/prompt.h"
+#include "../include/input.h"
 
 /* ── Shell-wide state definitions ─────────────────────────────────────────── */
 char shell_home[MAX_PATH];   /* directory where shell was launched */
@@ -36,29 +37,20 @@ int main(void)
         /* A1 — Print prompt */
         print_prompt();
 
-        /* A2 — Read input (placeholder: future days will add parsing) */
-        if (fgets(input, sizeof(input), stdin) == NULL) {
-            /* EOF (Ctrl-D): clean exit */
-            if (feof(stdin)) {
-                printf("\n");
-                break;
-            }
-            clearerr(stdin);
+        /* A2 — Read one line of input safely */
+        InputStatus status = read_input(input, sizeof(input));
+
+        if (status == INPUT_EOF) {
+            /* Ctrl-D: graceful exit */
+            printf("\n");
+            break;
+        }
+        if (status == INPUT_RETRY || status == INPUT_BLANK) {
+            /* Signal interrupt or blank line — re-prompt silently */
             continue;
         }
 
-        /* Strip trailing newline */
-        input[strcspn(input, "\n")] = '\0';
-
-        /* Skip blank lines */
-        int non_blank = 0;
-        for (int i = 0; input[i] != '\0'; i++) {
-            if (input[i] != ' ' && input[i] != '\t') {
-                non_blank = 1;
-                break;
-            }
-        }
-        if (!non_blank) continue;
+        /* status == INPUT_OK: we have a non-blank line in `input` */
 
         /*
          * Placeholder: echo the input back.
