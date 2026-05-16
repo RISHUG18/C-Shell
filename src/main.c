@@ -6,12 +6,14 @@
  *   • Run the main REPL loop:
  *       1. Print prompt           (prompt.h)
  *       2. Read one line of input (input.h)
- *       3. (Future days) Parse & execute tokens
+ *       3. Tokenise the line      (lexer.h)
+ *       4. (Future days) Parse & execute tokens
  */
 
 #include "../include/globals.h"
 #include "../include/prompt.h"
 #include "../include/input.h"
+#include "../include/lexer.h"
 
 /* ── Shell-wide state definitions ─────────────────────────────────────────── */
 char shell_home[MAX_PATH];   /* directory where shell was launched */
@@ -52,12 +54,23 @@ int main(void)
 
         /* status == INPUT_OK: we have a non-blank line in `input` */
 
+        /* A3 — Tokenise the input line */
+        TokenList *tl = lexer_tokenise(input);
+        if (tl == NULL) {
+            /* Allocation failure — non-fatal, just re-prompt */
+            fprintf(stderr, "lexer: allocation failure\n");
+            continue;
+        }
+
         /*
-         * Placeholder: echo the input back.
-         * Future days will replace this with tokenisation, parsing,
-         * and execution.
+         * Placeholder: print tokens for validation.
+         * Future days will replace this block with the parser/executor.
          */
-        printf("[debug] got: %s\n", input);
+        for (int i = 0; i < tl->count; i++) {
+            printf("[token %d] '%s'\n", i, tl->tokens[i]);
+        }
+
+        free_token_list(tl);
     }
 
     return 0;
