@@ -1,76 +1,69 @@
 /*
  * main.c — Entry point for C-Shell.
  *
- * Responsibilities:
- *   • Initialise shell-wide globals (shell_home, shell_cwd)
- *   • Run the main REPL loop:
- *       1. Print prompt           (prompt.h)
- *       2. Read one line of input (input.h)
- *       3. Tokenise the line      (lexer.h)
- *       4. (Future days) Parse & execute tokens
+ * REPL pipeline:
+ *   1. print_prompt()        — A1: display <user@host:cwd>
+ *   2. read_input()          — A2: safe line reader
+ *   3. lexer_tokenise()      — A3: split into tokens
+ *   4. parse()               — A3: build CommandGroup AST
+ *   5. (future) execute()    — run the AST
  */
 
 #include "../include/globals.h"
 #include "../include/prompt.h"
 #include "../include/input.h"
 #include "../include/lexer.h"
+#include "../include/parse.h"
 
 /* ── Shell-wide state definitions ─────────────────────────────────────────── */
-char shell_home[MAX_PATH];   /* directory where shell was launched */
-char shell_cwd[MAX_PATH];    /* current working directory          */
+char shell_home[MAX_PATH];
+char shell_cwd[MAX_PATH];
 
 /* ── main ─────────────────────────────────────────────────────────────────── */
 int main(void)
 {
-    /* Record the startup directory as the shell's "home" for ~ substitution */
     if (getcwd(shell_home, sizeof(shell_home)) == NULL) {
         perror("getcwd");
         exit(EXIT_FAILURE);
     }
-
-    /* Initialise shell_cwd to the same as home at startup */
     strncpy(shell_cwd, shell_home, MAX_PATH - 1);
     shell_cwd[MAX_PATH - 1] = '\0';
 
-    /* ── REPL loop ── */
     char input[MAX_INPUT];
 
     while (1) {
-        /* A1 — Print prompt */
         print_prompt();
 
-        /* A2 — Read one line of input safely */
         InputStatus status = read_input(input, sizeof(input));
+        if (status == INPUT_EOF)   { printf("\n"); break; }
+        if (status != INPUT_OK)    { continue; }
 
-        if (status == INPUT_EOF) {
-            /* Ctrl-D: graceful exit */
-            printf("\n");
-            break;
-        }
-        if (status == INPUT_RETRY || status == INPUT_BLANK) {
-            /* Signal interrupt or blank line — re-prompt silently */
-            continue;
-        }
-
-        /* status == INPUT_OK: we have a non-blank line in `input` */
-
-        /* A3 — Tokenise the input line */
         TokenList *tl = lexer_tokenise(input);
-        if (tl == NULL) {
-            /* Allocation failure — non-fatal, just re-prompt */
-            fprintf(stderr, "lexer: allocation failure\n");
+        if (tl == NULL) { fprintf(stderr, "lexer: allocation failure\n"); continue; }
+
+        CommandGroup *cg_list = parse(tl);
+        free_token_list(tl);
+
+        if (cg_list == NULL) {
+            /* parse() already printed "Invalid Syntax!" if needed */
             continue;
         }
 
-        /*
-         * Placeholder: print tokens for validation.
-         * Future days will replace this block with the parser/executor.
-         */
-        for (int i = 0; i < tl->count; i++) {
-            printf("[token %d] '%s'\n", i, tl->tokens[i]);
+        int g = 0;
+        for (CommandGroup *cg = cg_list; cg != NULL; cg = cg->next, g++) {
+            printf("[group %d] bg=%d\n", g, cg->is_background);
+            int p = 0;
+            for (Command *cmd = cg->pipeline->head; cmd != NULL; cmd = cmd->next, p++) {
+                printf("  [pipe %d] argc=%d argv[0]=%s\n", p, cmd->argc,
+                       cmd->argv && cmd->argv[0] ? cmd->argv[0] : "(null)");
+                if (cmd->input_file)  printf("    < %s\n", cmd->input_file);
+                if (cmd->output_file) printf("    %s %s\n",
+                                             cmd->append ? ">>" : ">",
+                                             cmd->output_file);
+            }
         }
 
-        free_token_list(tl);
+        free_command_group_list(cg_list);
     }
 
     return 0;
