@@ -2,11 +2,11 @@
  * main.c — Entry point for C-Shell.
  *
  * REPL pipeline:
- *   1. print_prompt()   — display <user@host:cwd>
- *   2. read_input()     — safe line reader
- *   3. lexer_tokenise() — split into tokens
- *   4. parse()          — build CommandGroup AST
- *   5. execute()        — run the AST (wired in later)
+ *   1. print_prompt()              — display <user@host:cwd>
+ *   2. read_input()                — safe line reader
+ *   3. lexer_tokenise()            — split into tokens
+ *   4. parse()                     — build CommandGroup AST
+ *   5. execute_command_group_list()— run the AST
  */
 
 #include "../include/globals.h"
@@ -14,6 +14,7 @@
 #include "../include/input.h"
 #include "../include/lexer.h"
 #include "../include/parse.h"
+#include "../include/execute.h"
 
 /* ── Shell-wide state definitions ─────────────────────────────────────────── */
 char shell_home[MAX_PATH];
@@ -44,12 +45,9 @@ int main(void)
         CommandGroup *cg_list = parse(tl);
         free_token_list(tl);
 
-        if (cg_list == NULL) {
-            /* parse() prints "Invalid Syntax!" when appropriate */
-            continue;
-        }
+        if (cg_list == NULL) continue;
 
-        /* TODO: pass cg_list to execute() — wired in next */
+        execute_command_group_list(cg_list);
         free_command_group_list(cg_list);
     }
 
