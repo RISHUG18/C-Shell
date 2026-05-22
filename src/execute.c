@@ -3,9 +3,11 @@
  *
  * Implements fork/exec dispatch for CommandGroups, Pipelines, and
  * individual Commands.  Uses execvp; handles ENOENT, EACCES, ENOEXEC.
+ * Built-in commands (hop, etc.) are intercepted before forking.
  */
 
 #include "../include/execute.h"
+#include "../include/builtins/hop.h"
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
@@ -68,6 +70,12 @@ static void report_exec_error(const char *cmd_name)
 void execute_single(Command *cmd, int *out_status)
 {
     if (cmd == NULL || cmd->argv == NULL || cmd->argv[0] == NULL) return;
+
+    /* ── Built-in: hop ── runs in the parent process (must change shell's cwd) */
+    if (strcmp(cmd->argv[0], "hop") == 0) {
+        builtin_hop(cmd);
+        return;
+    }
 
     pid_t pid = fork();
     if (pid < 0) { perror("fork"); return; }

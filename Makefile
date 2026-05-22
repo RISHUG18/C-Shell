@@ -17,8 +17,10 @@ INCDIR  := include
 BLDDIR  := build
 TARGET  := shell.out
 
-# Automatically discover all .c files under src/
-SRCS    := $(wildcard $(SRCDIR)/*.c)
+# Discover all .c files under src/ and src/builtins/
+SRCS    := $(wildcard $(SRCDIR)/*.c) $(wildcard $(SRCDIR)/builtins/*.c)
+
+# Map each source to its object file, preserving the builtins/ subpath
 OBJS    := $(patsubst $(SRCDIR)/%.c, $(BLDDIR)/%.o, $(SRCS))
 DEPS    := $(OBJS:.o=.d)
 
@@ -30,8 +32,9 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@
 
-# Compile each source file into a build artefact
+# Compile src/*.c
 $(BLDDIR)/%.o: $(SRCDIR)/%.c | $(BLDDIR)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Create the build directory if it doesn't exist
