@@ -8,6 +8,7 @@
 
 #include "../include/execute.h"
 #include "../include/builtins/hop.h"
+#include "../include/builtins/reveal.h"
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
@@ -71,9 +72,13 @@ void execute_single(Command *cmd, int *out_status)
 {
     if (cmd == NULL || cmd->argv == NULL || cmd->argv[0] == NULL) return;
 
-    /* ── Built-in: hop ── runs in the parent process (must change shell's cwd) */
+    /* ── Built-ins: run in parent process ── */
     if (strcmp(cmd->argv[0], "hop") == 0) {
         builtin_hop(cmd);
+        return;
+    }
+    if (strcmp(cmd->argv[0], "reveal") == 0) {
+        builtin_reveal(cmd);
         return;
     }
 
