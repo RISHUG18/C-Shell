@@ -4,9 +4,10 @@
  * REPL pipeline:
  *   1. print_prompt()              — display <user@host:cwd>
  *   2. read_input()                — safe line reader
- *   3. lexer_tokenise()            — split into tokens
- *   4. parse()                     — build CommandGroup AST
- *   5. execute_command_group_list()— run the AST
+ *   3. log_record()                — persist to history
+ *   4. lexer_tokenise()            — split into tokens
+ *   5. parse()                     — build CommandGroup AST
+ *   6. execute_command_group_list()— run the AST
  */
 
 #include "../include/globals.h"
@@ -15,6 +16,7 @@
 #include "../include/lexer.h"
 #include "../include/parse.h"
 #include "../include/execute.h"
+#include "../include/builtins/log.h"
 
 /* ── Shell-wide state definitions ─────────────────────────────────────────── */
 char shell_home[MAX_PATH];
@@ -38,6 +40,9 @@ int main(void)
         InputStatus status = read_input(input, sizeof(input));
         if (status == INPUT_EOF)  { printf("\n"); break; }
         if (status != INPUT_OK)   { continue; }
+
+        /* Persist to history before execution */
+        log_record(input);
 
         TokenList *tl = lexer_tokenise(input);
         if (tl == NULL) { fprintf(stderr, "lexer: allocation failure\n"); continue; }

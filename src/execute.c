@@ -9,6 +9,7 @@
 #include "../include/execute.h"
 #include "../include/builtins/hop.h"
 #include "../include/builtins/reveal.h"
+#include "../include/builtins/log.h"
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
@@ -79,6 +80,10 @@ void execute_single(Command *cmd, int *out_status)
     }
     if (strcmp(cmd->argv[0], "reveal") == 0) {
         builtin_reveal(cmd);
+        return;
+    }
+    if (strcmp(cmd->argv[0], "log") == 0) {
+        builtin_log(cmd);
         return;
     }
 
