@@ -16,17 +16,22 @@
 
 /* ── apply_redirections ────────────────────────────────────────────────────
  * Called inside the child process after fork().
- * Returns 0 on success, -1 on failure (error already printed).
+ * Applies input (<) and output (> / >>) redirections using open()+dup2().
+ * Exact error strings match the evaluation spec.
+ * Returns 0 on success, -1 on failure (error already printed to stderr).
  */
 static int apply_redirections(Command *cmd)
 {
     if (cmd->input_file != NULL) {
         int fd = open(cmd->input_file, O_RDONLY);
         if (fd < 0) {
-            fprintf(stderr, "No such file or directory: %s\n", cmd->input_file);
+            fprintf(stderr, "No such file or directory\n");
             return -1;
         }
-        if (dup2(fd, STDIN_FILENO) < 0) { perror("dup2 stdin"); close(fd); return -1; }
+        if (dup2(fd, STDIN_FILENO) < 0) {
+            fprintf(stderr, "dup2: stdin redirect failed\n");
+            close(fd); return -1;
+        }
         close(fd);
     }
 
@@ -34,10 +39,13 @@ static int apply_redirections(Command *cmd)
         int flags = O_WRONLY | O_CREAT | (cmd->append ? O_APPEND : O_TRUNC);
         int fd = open(cmd->output_file, flags, 0644);
         if (fd < 0) {
-            fprintf(stderr, "Cannot open output file: %s\n", cmd->output_file);
+            fprintf(stderr, "Unable to create file for writing\n");
             return -1;
         }
-        if (dup2(fd, STDOUT_FILENO) < 0) { perror("dup2 stdout"); close(fd); return -1; }
+        if (dup2(fd, STDOUT_FILENO) < 0) {
+            fprintf(stderr, "dup2: stdout redirect failed\n");
+            close(fd); return -1;
+        }
         close(fd);
     }
 
