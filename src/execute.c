@@ -113,76 +113,103 @@ void execute_single(Command *cmd, int *out_status)
 }
 
 /* ── execute_pipeline ──────────────────────────────────────────────────────
- * Execute a Pipeline: fork one child per command, connect with pipes.
+ * Execute a Pipeline by forking one child per command.
+ *
+ * Algorithm:
+ *   - Maintain prev_fd = read-end of the previous pipe (-1 for first cmd).
+ *   - For each command (except last), create a pipe().
+ *   - In child: dup2(prev_fd → stdin), dup2(write-end → stdout), then
+ *     apply file redirections (these override the pipe ends if specified).
+ *   - In parent: close prev_fd and the write-end of the new pipe; save
+ *     the read-end as the new prev_fd.
+ *   - After all forks, waitpid() on EVERY child before returning.
  */
 void execute_pipeline(Pipeline *pl)
 {
     if (pl == NULL || pl->head == NULL) return;
 
-    /* Single-command pipeline: shortcut to execute_single */
+    /* Single-command shortcut */
     if (pl->cmd_count == 1) {
         execute_single(pl->head, NULL);
         return;
     }
 
-    /* Multi-command pipeline */
     int n = pl->cmd_count;
     pid_t *pids = malloc(n * sizeof(pid_t));
     if (pids == NULL) { perror("malloc"); return; }
 
-    int prev_read = -1;   /* read-end of the previous pipe */
-    int cmd_idx   = 0;
-    Command *cmd  = pl->head;
+    int prev_fd  = -1;   /* read-end of the pipe connecting previous → current */
+    int spawned  = 0;
+    Command *cmd = pl->head;
 
     while (cmd != NULL) {
-        int pipefd[2] = {-1, -1};
+        int pfd[2] = {-1, -1};
         int is_last = (cmd->next == NULL);
 
-        /* Create a pipe unless this is the last command */
-        if (!is_last) {
-            if (pipe(pipefd) < 0) { perror("pipe"); break; }
+        /* Open the next pipe unless this is the last stage */
+        if (!is_last && pipe(pfd) < 0) {
+            perror("pipe");
+            if (prev_fd != -1) close(prev_fd);
+            break;
         }
 
         pid_t pid = fork();
-        if (pid < 0) { perror("fork"); break; }
+        if (pid < 0) {
+            perror("fork");
+            if (!is_last) { close(pfd[0]); close(pfd[1]); }
+            if (prev_fd != -1) close(prev_fd);
+            break;
+        }
 
         if (pid == 0) {
-            /* Child: wire up stdin from previous pipe */
-            if (prev_read != -1) {
-                dup2(prev_read, STDIN_FILENO);
-                close(prev_read);
-            }
-            /* Wire stdout to write-end of current pipe */
-            if (!is_last) {
-                dup2(pipefd[1], STDOUT_FILENO);
-                close(pipefd[0]);
-                close(pipefd[1]);
+            /* ── Child ── */
+
+            /* Connect stdin to the read-end of the previous pipe */
+            if (prev_fd != -1) {
+                if (dup2(prev_fd, STDIN_FILENO) < 0) _exit(1);
+                close(prev_fd);
             }
 
-            /* Per-command redirections (override pipe if specified) */
+            /* Connect stdout to the write-end of the new pipe */
+            if (!is_last) {
+                if (dup2(pfd[1], STDOUT_FILENO) < 0) _exit(1);
+                close(pfd[0]);
+                close(pfd[1]);
+            }
+
+            /* File redirections override pipe endpoints if present */
             if (apply_redirections(cmd) < 0) _exit(1);
 
             execvp(cmd->argv[0], cmd->argv);
             report_exec_error(cmd->argv[0]);
+            /* never reached */
         }
 
-        /* Parent: close ends we no longer need */
-        if (prev_read != -1) close(prev_read);
+        /* ── Parent ── */
+
+        /* We no longer need the read-end of the previous pipe */
+        if (prev_fd != -1) close(prev_fd);
+
+        /* Close the write-end of the new pipe (child owns it now) */
         if (!is_last) {
-            close(pipefd[1]);
-            prev_read = pipefd[0];
+            close(pfd[1]);
+            prev_fd = pfd[0];   /* save read-end for the next iteration */
+        } else {
+            prev_fd = -1;
         }
 
-        pids[cmd_idx++] = pid;
+        pids[spawned++] = pid;
         cmd = cmd->next;
     }
 
-    /* Wait for all children */
-    for (int i = 0; i < cmd_idx; i++) {
+    /* Wait for ALL children before returning to the prompt */
+    for (int i = 0; i < spawned; i++) {
         waitpid(pids[i], NULL, 0);
     }
 
+    if (prev_fd != -1) close(prev_fd);
     free(pids);
+
 }
 
 /* ── execute_command_group_list ────────────────────────────────────────────
