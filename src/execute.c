@@ -2,6 +2,7 @@
 #include "../include/builtins/hop.h"
 #include "../include/builtins/reveal.h"
 #include "../include/builtins/log.h"
+#include "../include/jobs.h"
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
@@ -122,12 +123,19 @@ void execute_command_group_list(CommandGroup *head)
             pid_t pid = fork();
             if (pid < 0) { perror("fork"); continue; }
             if (pid == 0) {
+                setpgid(0, 0);
                 int devnull = open("/dev/null", O_RDONLY);
                 if (devnull >= 0) { dup2(devnull, STDIN_FILENO); close(devnull); }
                 execute_pipeline(cg->pipeline);
                 exit(0);
             }
-            printf("[1] %d\n", pid);
+            setpgid(pid, pid);
+            const char *name = (cg->pipeline && cg->pipeline->head &&
+                                cg->pipeline->head->argv &&
+                                cg->pipeline->head->argv[0])
+                               ? cg->pipeline->head->argv[0] : "?";
+            int idx = add_job(pid, name);
+            printf("[%d] %d\n", jobs[idx].job_num, pid);
         } else {
             execute_pipeline(cg->pipeline);
         }
