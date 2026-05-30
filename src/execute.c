@@ -2,6 +2,8 @@
 #include "../include/builtins/hop.h"
 #include "../include/builtins/reveal.h"
 #include "../include/builtins/log.h"
+#include "../include/builtins/activities.h"
+#include "../include/builtins/ping.h"
 #include "../include/jobs.h"
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -44,9 +46,11 @@ void execute_single(Command *cmd, int *out_status)
 {
     if (!cmd || !cmd->argv || !cmd->argv[0]) return;
 
-    if (strcmp(cmd->argv[0], "hop")    == 0) { builtin_hop(cmd);    return; }
-    if (strcmp(cmd->argv[0], "reveal") == 0) { builtin_reveal(cmd); return; }
-    if (strcmp(cmd->argv[0], "log")    == 0) { builtin_log(cmd);    return; }
+    if (strcmp(cmd->argv[0], "hop")        == 0) { builtin_hop(cmd);        return; }
+    if (strcmp(cmd->argv[0], "reveal")     == 0) { builtin_reveal(cmd);     return; }
+    if (strcmp(cmd->argv[0], "log")        == 0) { builtin_log(cmd);        return; }
+    if (strcmp(cmd->argv[0], "activities") == 0) { builtin_activities(cmd); return; }
+    if (strcmp(cmd->argv[0], "ping")       == 0) { builtin_ping(cmd);       return; }
 
     pid_t pid = fork();
     if (pid < 0) { perror("fork"); return; }
