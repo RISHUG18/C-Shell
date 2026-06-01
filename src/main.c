@@ -7,8 +7,9 @@
 #include "../include/signals.h"
 #include "../include/builtins/log.h"
 
-char shell_home[MAX_PATH];
-char shell_cwd[MAX_PATH];
+char  shell_home[MAX_PATH];
+char  shell_cwd[MAX_PATH];
+pid_t fg_pgid = 0;
 
 int main(void)
 {
@@ -20,6 +21,7 @@ int main(void)
     shell_cwd[MAX_PATH - 1] = '\0';
 
     setup_signals();
+    init_execute();
 
     char input[MAX_INPUT];
 

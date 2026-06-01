@@ -8,6 +8,19 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <termios.h>
+
+static int shell_tty = -1;
+
+void init_execute(void)
+{
+    shell_tty = open("/dev/tty", O_RDWR);
+    if (shell_tty < 0) shell_tty = STDIN_FILENO;
+    setpgid(0, 0);
+    tcsetpgrp(shell_tty, getpgid(0));
+    signal(SIGTTOU, SIG_IGN);
+    signal(SIGTTIN, SIG_IGN);
+}
 
 static int apply_redirections(Command *cmd)
 {
@@ -56,14 +69,30 @@ void execute_single(Command *cmd, int *out_status)
     if (pid < 0) { perror("fork"); return; }
 
     if (pid == 0) {
+        setpgid(0, 0);
         if (apply_redirections(cmd) < 0) _exit(1);
         execvp(cmd->argv[0], cmd->argv);
         exec_error(cmd->argv[0]);
     }
 
+    setpgid(pid, pid);
+    fg_pgid = pid;
+    if (shell_tty >= 0) tcsetpgrp(shell_tty, pid);
+
     int st = 0;
-    waitpid(pid, &st, 0);
-    if (out_status) *out_status = st;
+    waitpid(pid, &st, WUNTRACED);
+
+    if (shell_tty >= 0) tcsetpgrp(shell_tty, getpgid(0));
+    fg_pgid = 0;
+
+    if (WIFSTOPPED(st)) {
+        const char *name = cmd->argv[0];
+        int idx = add_job(pid, name);
+        jobs[idx].state = JOB_STOPPED;
+        printf("\n[%d] Stopped   %s\n", jobs[idx].job_num, name);
+    } else {
+        if (out_status) *out_status = st;
+    }
 }
 
 void execute_pipeline(Pipeline *pl)
@@ -75,6 +104,7 @@ void execute_pipeline(Pipeline *pl)
         return;
     }
 
+    pid_t pgid = 0;
     pid_t *pids = malloc(pl->cmd_count * sizeof(pid_t));
     if (!pids) { perror("malloc"); return; }
 
@@ -100,12 +130,17 @@ void execute_pipeline(Pipeline *pl)
         }
 
         if (pid == 0) {
+            if (pgid == 0) pgid = getpid();
+            setpgid(0, pgid);
             if (prev_fd != -1) { dup2(prev_fd, STDIN_FILENO); close(prev_fd); }
             if (!last) { dup2(pfd[1], STDOUT_FILENO); close(pfd[0]); close(pfd[1]); }
             if (apply_redirections(cmd) < 0) _exit(1);
             execvp(cmd->argv[0], cmd->argv);
             exec_error(cmd->argv[0]);
         }
+
+        if (pgid == 0) pgid = pid;
+        setpgid(pid, pgid);
 
         if (prev_fd != -1) close(prev_fd);
         if (!last) { close(pfd[1]); prev_fd = pfd[0]; }
@@ -115,7 +150,14 @@ void execute_pipeline(Pipeline *pl)
         cmd = cmd->next;
     }
 
-    for (int i = 0; i < spawned; i++) waitpid(pids[i], NULL, 0);
+    fg_pgid = pgid;
+    if (shell_tty >= 0 && pgid > 0) tcsetpgrp(shell_tty, pgid);
+
+    for (int i = 0; i < spawned; i++) waitpid(pids[i], NULL, WUNTRACED);
+
+    if (shell_tty >= 0) tcsetpgrp(shell_tty, getpgid(0));
+    fg_pgid = 0;
+
     if (prev_fd != -1) close(prev_fd);
     free(pids);
 }
