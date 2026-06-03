@@ -93,8 +93,10 @@ void execute_single(Command *cmd, int *out_status)
     if (WIFSTOPPED(st)) {
         const char *name = cmd->argv[0];
         int idx = add_job(pid, name);
-        jobs[idx].state = JOB_STOPPED;
-        printf("\n[%d] Stopped   %s\n", jobs[idx].job_num, name);
+        if (idx >= 0) {
+            jobs[idx].state = JOB_STOPPED;
+            printf("\n[%d] Stopped   %s\n", jobs[idx].job_num, name);
+        }
     } else {
         if (out_status) *out_status = st;
     }
@@ -158,7 +160,17 @@ void execute_pipeline(Pipeline *pl)
     fg_pgid = pgid;
     if (shell_tty >= 0 && pgid > 0) tcsetpgrp(shell_tty, pgid);
 
-    for (int i = 0; i < spawned; i++) waitpid(pids[i], NULL, WUNTRACED);
+    for (int i = 0; i < spawned; i++) {
+        int st = 0;
+        waitpid(pids[i], &st, WUNTRACED);
+        if (WIFSTOPPED(st)) {
+            int idx = add_job(pids[i], pl->head ? pl->head->argv[0] : "?");
+            if (idx >= 0) {
+                jobs[idx].state = JOB_STOPPED;
+                printf("\n[%d] Stopped   %s\n", jobs[idx].job_num, jobs[idx].name);
+            }
+        }
+    }
 
     if (shell_tty >= 0) tcsetpgrp(shell_tty, getpgid(0));
     fg_pgid = 0;
@@ -186,7 +198,8 @@ void execute_command_group_list(CommandGroup *head)
                                 cg->pipeline->head->argv[0])
                                ? cg->pipeline->head->argv[0] : "?";
             int idx = add_job(pid, name);
-            printf("[%d] %d\n", jobs[idx].job_num, pid);
+            if (idx >= 0)
+                printf("[%d] %d\n", jobs[idx].job_num, pid);
         } else {
             execute_pipeline(cg->pipeline);
         }

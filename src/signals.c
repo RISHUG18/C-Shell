@@ -4,52 +4,44 @@
 #include <sys/wait.h>
 #include <stdio.h>
 
-/* shell ignores Ctrl-C so only foreground children are affected */
-static void sigint_handler(int sig)
-{
-    (void)sig;
-}
-
-static void sigtstp_handler(int sig)
-{
-    (void)sig;
-}
+static void sigint_handler(int sig)  { (void)sig; }
+static void sigtstp_handler(int sig) { (void)sig; }
 
 void setup_signals(void)
 {
     struct sigaction sa;
-    sa.sa_flags = SA_RESTART;
     sigemptyset(&sa.sa_mask);
 
+    /* SIGINT: restart syscalls (fgets retries after Ctrl-C) */
+    sa.sa_flags   = SA_RESTART;
     sa.sa_handler = sigint_handler;
     sigaction(SIGINT, &sa, NULL);
 
+    /* SIGTSTP: do NOT restart — lets fgets return EINTR so the shell
+       can re-display the prompt immediately after Ctrl-Z stops a job */
+    sa.sa_flags   = 0;
     sa.sa_handler = sigtstp_handler;
     sigaction(SIGTSTP, &sa, NULL);
 
-    /* ignore SIGTTOU so background jobs don't stall on tty writes */
     signal(SIGTTOU, SIG_IGN);
+    signal(SIGCHLD, SIG_DFL);
 }
 
 void check_bg_jobs(void)
 {
     int i = 0;
     while (i < job_count) {
-        Job *j = &jobs[i];
-        if (!j->active) { i++; continue; }
-
         int status;
-        pid_t res = waitpid(j->pid, &status, WNOHANG | WUNTRACED);
+        pid_t res = waitpid(jobs[i].pid, &status, WNOHANG | WUNTRACED);
 
-        if (res == j->pid) {
+        if (res == jobs[i].pid) {
             if (WIFSTOPPED(status)) {
-                j->state = JOB_STOPPED;
-                printf("\n[%d] Stopped   %s\n", j->job_num, j->name);
+                jobs[i].state = JOB_STOPPED;
+                printf("\n[%d] Stopped   %s\n", jobs[i].job_num, jobs[i].name);
                 i++;
             } else {
-                printf("\n[%d] Done   %s\n", j->job_num, j->name);
+                printf("\n[%d] Done   %s\n", jobs[i].job_num, jobs[i].name);
                 remove_job(i);
-                /* don't increment i — remove_job compacts the array */
             }
         } else {
             i++;

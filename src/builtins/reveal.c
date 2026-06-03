@@ -57,18 +57,25 @@ static void list_dir(const char *path, int show_all, int long_fmt)
     if (!names) { closedir(dir); return; }
 
     struct dirent *entry;
+    int oom = 0;
     while ((entry = readdir(dir)) != NULL) {
         if (!show_all && entry->d_name[0] == '.') continue;
         if (count >= cap) {
             cap *= 2;
             char **tmp = realloc(names, cap * sizeof(char *));
-            if (!tmp) break;
+            if (!tmp) { oom = 1; break; }
             names = tmp;
         }
         names[count] = strdup(entry->d_name);
         if (names[count]) count++;
     }
     closedir(dir);
+
+    if (oom) {
+        for (int i = 0; i < count; i++) free(names[i]);
+        free(names);
+        return;
+    }
 
     qsort(names, count, sizeof(char *), cmp_names);
 

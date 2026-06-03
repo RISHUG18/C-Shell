@@ -44,8 +44,16 @@ void log_record(const char *input_line)
 {
     if (input_line == NULL || input_line[0] == '\0') return;
 
-    /* Skip if line contains "log" as a word */
-    if (strstr(input_line, "log") != NULL) return;
+    /* Skip if "log" appears as a standalone word anywhere in the line */
+    {
+        const char *p = input_line;
+        while ((p = strstr(p, "log")) != NULL) {
+            int before_ok = (p == input_line || p[-1] == ' ' || p[-1] == '\t');
+            int after_ok  = (p[3] == '\0'   || p[3] == ' ' || p[3] == '\t');
+            if (before_ok && after_ok) return;
+            p += 3;
+        }
+    }
 
     char lines[LOG_MAX_ENTRIES][MAX_INPUT];
     int n = load_log(lines);

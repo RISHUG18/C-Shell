@@ -16,29 +16,40 @@ void builtin_fg(Command *cmd)
         return;
     }
 
-    Job *j = &jobs[idx];
+    /* Copy what we need before the array may shift under us */
+    pid_t  jpid    = jobs[idx].pid;
+    int    jnum    = jobs[idx].job_num;
+    char   jname[256];
+    strncpy(jname, jobs[idx].name, 255);
+    jname[255] = '\0';
+
     int tty = open("/dev/tty", O_RDWR);
     if (tty < 0) tty = STDIN_FILENO;
 
-    printf("%s\n", j->name);
+    printf("%s\n", jname);
 
-    if (tcsetpgrp(tty, j->pid) < 0) perror("tcsetpgrp");
+    if (tcsetpgrp(tty, jpid) < 0) perror("tcsetpgrp");
 
-    kill(-j->pid, SIGCONT);
-    j->state = JOB_RUNNING;
-    fg_pgid   = j->pid;
+    kill(-jpid, SIGCONT);
+    jobs[idx].state = JOB_RUNNING;
+    fg_pgid = jpid;
 
     int status;
-    waitpid(-j->pid, &status, WUNTRACED);
+    waitpid(-jpid, &status, WUNTRACED);
 
     tcsetpgrp(tty, getpgid(0));
     fg_pgid = 0;
 
+    /* Re-find by pid: the index may have shifted if check_bg_jobs ran */
+    idx = find_job_by_pid(jpid);
+
     if (WIFSTOPPED(status)) {
-        j->state = JOB_STOPPED;
-        printf("\n[%d] Stopped   %s\n", j->job_num, j->name);
+        if (idx >= 0) {
+            jobs[idx].state = JOB_STOPPED;
+            printf("\n[%d] Stopped   %s\n", jnum, jname);
+        }
     } else {
-        remove_job(idx);
+        if (idx >= 0) remove_job(idx);
     }
 
     if (tty != STDIN_FILENO) close(tty);
