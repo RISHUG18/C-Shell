@@ -4,7 +4,7 @@ A feature-rich POSIX-compliant shell written in C from scratch — with AST-base
 
 ---
 
-## 🌟 What Makes This Shell Special
+## What Makes This Shell Special
 
 ### Unique Features
 
@@ -18,7 +18,7 @@ A feature-rich POSIX-compliant shell written in C from scratch — with AST-base
 
 ---
 
-## 🛠️ Built-in Commands
+## Built-in Commands
 
 | Command | Description | Source |
 |---------|-------------|--------|
@@ -33,7 +33,7 @@ A feature-rich POSIX-compliant shell written in C from scratch — with AST-base
 
 ---
 
-## ⚙️ Core Features
+## Core Features
 
 ### Process Management
 
@@ -69,7 +69,7 @@ A feature-rich POSIX-compliant shell written in C from scratch — with AST-base
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 Raw Input
@@ -102,7 +102,7 @@ Executor (execute.c)
 
 ---
 
-## 🚀 Building & Running
+## Building & Running
 
 ```bash
 make          # Compile with strict flags, outputs shell.out
@@ -120,7 +120,7 @@ make clean    # Remove build/ and shell.out
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 C-Shell/
@@ -159,7 +159,7 @@ C-Shell/
 
 ---
 
-## 🔍 Technical Highlights
+## Technical Highlights
 
 ### Advanced Implementation Details
 
@@ -194,7 +194,7 @@ make all ; ./shell.out
 
 ---
 
-## ⚠️ Constraints
+## Constraints
 
 - Max **128** concurrent background jobs (`MAX_JOBS`)
 - Max **15** command history entries (`LOG_MAX_ENTRIES`)
